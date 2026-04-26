@@ -27,6 +27,10 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
                     this.currentIp = data.ip;
                     await this._updateModelsList(data.ip);
                     break;
+                case 'disconnect':
+                    this.currentIp = "";
+                    this._view?.webview.postMessage({ type: 'onDisconnected' });
+                    break;
                 case 'askOllama':
                     this.currentModel = data.model;
                     this.messageHistory = data.history || []; 
@@ -70,9 +74,6 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
                 stream: true,
             });
 
-            // Solo enviamos una señal de que el streaming comenzó
-            this._view.webview.postMessage({ type: 'streamingStarted' });
-
             let fullText = "";
             for await (const chunk of stream) {
                 const content = chunk.choices[0]?.delta?.content || "";
@@ -83,16 +84,21 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
             this._view.webview.postMessage({ type: 'endResponse', fullText: fullText });
         } catch (err: any) {
             this._view.webview.postMessage({ type: 'showError', value: err.message });
+            this._view?.webview.postMessage({ type: 'onDisconnected' });
         }
     }
 
     private async _updateModelsList(ip: string) {
         try {
             const response = await fetch(`http://${ip}:11434/api/tags`);
+            if (!response.ok) throw new Error();
             const data: any = await response.json();
-            this._view?.webview.postMessage({ type: 'setModels', models: data.models.map((m: any) => m.name) });
+            const models = data.models.map((m: any) => m.name);
+            this._view?.webview.postMessage({ type: 'setModels', models });
+            this._view?.webview.postMessage({ type: 'onConnected' });
         } catch (e) {
             this._view?.webview.postMessage({ type: 'showError', value: "Error de conexión." });
+            this._view?.webview.postMessage({ type: 'onDisconnected' });
         }
     }
 
@@ -115,7 +121,11 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
                 pre { border-radius: 4px; font-size: 12px !important; }
                 .file-tag { color: #4ec9b0; font-size: 11px; display: block; margin-top: 8px; font-weight: bold; }
                 textarea { width: 100%; background: #3c3c3c; color: white; border: 1px solid #555; padding: 8px; resize: none; box-sizing: border-box; }
+                
                 button { background: #007acc; color: white; border: none; padding: 8px; cursor: pointer; border-radius: 2px; }
+                button:disabled { opacity: 0.5; cursor: not-allowed; }
+                .btn-disconnect { background: #a91515 !important; }
+                
                 .full-btn { width: 100%; margin-top: 5px; }
                 .config-section { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; border-bottom: 1px solid #444; padding-bottom: 10px; }
                 input, select { background: #3c3c3c; color: white; border: 1px solid #555; padding: 5px; }
@@ -125,7 +135,7 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
             <div class="config-section">
                 <div style="display:flex; gap:5px;">
                     <input id="ip" type="text" placeholder="IP Ollama">
-                    <button onclick="connect()">Conectar</button>
+                    <button id="conn-btn" onclick="toggleConnect()">Conectar</button>
                 </div>
                 <select id="model-select" onchange="saveState()"></select>
             </div>
@@ -136,28 +146,45 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
 
             <script>
                 const vscode = acquireVsCodeApi();
-                const oldState = vscode.getState() || { html: "", history: [], ip: "", model: "", models: [] };
+                const oldState = vscode.getState() || { html: "", history: [], ip: "", model: "", models: [], isConnected: false };
                 let messageHistory = oldState.history;
+                let isConnected = oldState.isConnected;
                 
                 document.getElementById('ip').value = oldState.ip || "";
                 document.getElementById('chat').innerHTML = oldState.html || "";
+                
                 if (oldState.models && oldState.models.length > 0) {
                     renderModels(oldState.models, oldState.model);
                 }
+                
+                // Restaurar UI del botón
+                updateButtonUI(isConnected);
+
                 if(oldState.html) Prism.highlightAllUnder(document.getElementById('chat'));
-                if(oldState.ip) vscode.postMessage({ type: 'fetchModels', ip: oldState.ip });
+                if(oldState.ip && isConnected) vscode.postMessage({ type: 'fetchModels', ip: oldState.ip });
 
                 let currentAiDiv = null;
                 let writtenFiles = new Set();
 
                 window.addEventListener('message', event => {
                     const m = event.data;
+                    
+                    if (m.type === 'onConnected') {
+                        isConnected = true;
+                        updateButtonUI(true);
+                        saveState();
+                    }
+                    if (m.type === 'onDisconnected') {
+                        isConnected = false;
+                        updateButtonUI(false);
+                        document.getElementById('model-select').innerHTML = '';
+                        saveState();
+                    }
                     if (m.type === 'setModels') {
                         renderModels(m.models, vscode.getState()?.model);
                         saveState();
                     }
                     if (m.type === 'addChunk') {
-                        // En cuanto llega texto, quitamos el mensaje de "Pensando"
                         currentAiDiv.innerHTML = marked.parse(m.value);
                         Prism.highlightAllUnder(currentAiDiv);
                         detectFiles(m.value);
@@ -174,7 +201,39 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
                         currentAiDiv.appendChild(tag);
                         saveState();
                     }
+                    if (m.type === 'showError') {
+                        const errDiv = document.createElement('div');
+                        errDiv.className = 'msg';
+                        errDiv.style.color = '#f48771';
+                        errDiv.innerText = "❌ " + m.value;
+                        document.getElementById('chat').appendChild(errDiv);
+                    }
                 });
+
+                function updateButtonUI(connected) {
+                    const btn = document.getElementById('conn-btn');
+                    const ipInput = document.getElementById('ip');
+                    if (connected) {
+                        btn.innerText = "Desconectar";
+                        btn.classList.add('btn-disconnect');
+                        ipInput.disabled = true;
+                    } else {
+                        btn.innerText = "Conectar";
+                        btn.classList.remove('btn-disconnect');
+                        ipInput.disabled = false;
+                    }
+                }
+
+                function toggleConnect() {
+                    if (isConnected) {
+                        vscode.postMessage({ type: 'disconnect' });
+                    } else {
+                        const ip = document.getElementById('ip').value;
+                        if (!ip) return;
+                        document.getElementById('conn-btn').innerText = "Cargando...";
+                        vscode.postMessage({ type: 'fetchModels', ip });
+                    }
+                }
 
                 function renderModels(models, selected) {
                     const select = document.getElementById('model-select');
@@ -188,7 +247,8 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
                         history: messageHistory,
                         ip: document.getElementById('ip').value,
                         model: select.value,
-                        models: Array.from(select.options).map(o => o.value)
+                        models: Array.from(select.options).map(o => o.value),
+                        isConnected: isConnected
                     });
                 }
 
@@ -205,39 +265,32 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
                     }
                 }
 
-                function connect() {
-                    vscode.postMessage({ type: 'fetchModels', ip: document.getElementById('ip').value });
-                    saveState();
-                }
-
                 function send() {
+                    if (!isConnected) {
+                        alert("Por favor, conéctate a Ollama primero.");
+                        return;
+                    }
                     const promptInput = document.getElementById('prompt');
                     const prompt = promptInput.value.trim();
                     const model = document.getElementById('model-select').value;
-                    
                     if(!prompt || !model) return;
 
-                    // 1. Pintar el mensaje del usuario INMEDIATAMENTE
                     const chat = document.getElementById('chat');
                     const userDiv = document.createElement('div');
                     userDiv.className = 'msg user-msg';
                     userDiv.innerText = "Tú: " + prompt;
                     chat.appendChild(userDiv);
 
-                    // 2. Pintar el indicador de "Pensando" INMEDIATAMENTE
                     currentAiDiv = document.createElement('div');
                     currentAiDiv.className = 'msg';
                     currentAiDiv.innerHTML = '<div class="thinking">Pensando en la inmortalidad del cangrejo<span class="dots"></span></div>';
                     chat.appendChild(currentAiDiv);
 
-                    // Hacer scroll
                     chat.scrollTop = chat.scrollHeight;
 
-                    // 3. Enviar a la extensión
                     messageHistory.push({ role: "user", content: prompt });
                     vscode.postMessage({ type: 'askOllama', value: prompt, model, history: messageHistory });
                     
-                    // Limpiar input y guardar estado visual
                     promptInput.value = '';
                     writtenFiles.clear();
                     saveState();
