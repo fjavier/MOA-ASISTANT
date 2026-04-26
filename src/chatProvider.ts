@@ -61,13 +61,6 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
           await this.updateModels(data.ip);
           break;
 
-        case "disconnect":
-          this.currentIp = "";
-          this._view?.webview.postMessage({
-            type: "onDisconnected"
-          });
-          break;
-
         case "askOllama":
           this.currentModel = data.model;
           await this.ask(data.value);
@@ -140,23 +133,18 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
       const folders = vscode.workspace.workspaceFolders;
       if (!folders) return;
 
-      const fullPath = path.join(
+      const full = path.join(
         folders[0].uri.fsPath,
         relativePath.trim()
       );
 
-      const dir = path.dirname(fullPath);
+      const dir = path.dirname(full);
 
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      fs.writeFileSync(fullPath, code, "utf8");
-
-      this._view?.webview.postMessage({
-        type: "fileDone",
-        path: relativePath
-      });
+      fs.writeFileSync(full, code, "utf8");
 
     } catch {}
   }
@@ -179,13 +167,10 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
           {
             role: "system",
             content:
-              "Eres un agente programador experto. Si creas archivos usa ---FILE:ruta---"
+              "Eres un agente programador experto. Usa markdown. Si creas archivos usa ---FILE:ruta---"
           },
           ...chat.messages,
-          {
-            role: "user",
-            content: prompt
-          }
+          { role: "user", content: prompt }
         ],
         stream: true
       });
@@ -208,7 +193,7 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
       );
 
       if (chat.messages.length === 2) {
-        chat.title = prompt.substring(0, 20);
+        chat.title = prompt.substring(0, 24);
       }
 
       chat.html += `
@@ -217,7 +202,7 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
 </div>
 
 <div class="row aiRow">
-  <div class="bubble aiBubble">${fullText}</div>
+  <div class="bubble aiBubble markdown-body">${fullText}</div>
 </div>
 `;
 
@@ -254,10 +239,6 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
         models
       });
 
-      this._view?.webview.postMessage({
-        type: "onConnected"
-      });
-
     } catch {
       this._view?.webview.postMessage({
         type: "showError",
@@ -267,13 +248,22 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
   }
 
   private getHtml() {
-    return `
+return `
 <!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
+
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+<link rel="stylesheet"
+href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-java.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
 
 <style>
 
@@ -287,7 +277,6 @@ export class OllamaChatProvider implements vscode.WebviewViewProvider {
 --accent:#2383e2;
 --accent2:#1f6feb;
 --bubble:#1b222c;
---success:#238636;
 }
 
 *{
@@ -309,93 +298,17 @@ display:flex;
 flex-direction:column;
 }
 
-/* HEADER PROFESIONAL */
-
 #topbar{
-padding:12px 14px;
+padding:10px 14px;
 display:flex;
-flex-direction:column;
 gap:10px;
-background:#0f141a;
+align-items:center;
 border-bottom:1px solid var(--border);
-}
-
-.top-row,
-.bottom-row{
-display:flex;
-align-items:center;
-gap:10px;
-}
-
-.top-row{
-justify-content:space-between;
-}
-
-.brand{
-font-size:12px;
-font-weight:700;
-letter-spacing:.5px;
-white-space:nowrap;
-}
-
-.statusWrap{
-display:flex;
-align-items:center;
-gap:8px;
-font-size:12px;
-color:var(--muted);
-}
-
-#status{
-width:9px;
-height:9px;
-border-radius:50%;
-background:#666;
-}
-
-.connected{
-background:var(--success)!important;
-box-shadow:0 0 8px rgba(35,134,54,.6);
-}
-
-#ip{
-flex:1;
-min-width:0;
-}
-
-#ip,#model{
-height:38px;
-padding:0 12px;
-border-radius:10px;
-border:1px solid var(--border);
 background:#11161c;
-color:white;
-outline:none;
 }
-
-#model{
-min-width:180px;
-}
-
-#connectBtn{
-height:38px;
-padding:0 16px;
-border:none;
-border-radius:10px;
-background:linear-gradient(180deg,var(--accent),var(--accent2));
-color:white;
-font-weight:600;
-cursor:pointer;
-}
-
-#connectBtn:hover{
-filter:brightness(1.08);
-}
-
-/* TABS */
 
 #tabs{
-height:52px;
+height:48px;
 display:flex;
 align-items:center;
 gap:8px;
@@ -403,17 +316,6 @@ padding:0 10px;
 overflow-x:auto;
 border-bottom:1px solid var(--border);
 background:var(--panel);
-}
-
-#newTab{
-min-width:34px;
-height:34px;
-border:none;
-border-radius:10px;
-background:linear-gradient(180deg,var(--accent),var(--accent2));
-color:white;
-font-size:18px;
-cursor:pointer;
 }
 
 #tabList{
@@ -439,34 +341,29 @@ background:#1a2940;
 border-color:#29598a;
 }
 
-.close{
-opacity:.7;
+#newTab{
+width:34px;
+height:34px;
+border:none;
+border-radius:10px;
+background:linear-gradient(180deg,var(--accent),var(--accent2));
+color:white;
 cursor:pointer;
+font-size:18px;
 }
-
-/* CHAT */
 
 #chatWrap{
 flex:1;
 overflow:auto;
-padding:24px;
-display:flex;
-justify-content:center;
+padding:22px;
 }
 
 #chatArea{
-width:100%;
-max-width:920px;
+max-width:1100px;
+margin:auto;
 display:flex;
 flex-direction:column;
-gap:16px;
-}
-
-#chatTitle{
-text-align:center;
-color:var(--muted);
-font-size:13px;
-margin-bottom:10px;
+gap:18px;
 }
 
 .row{
@@ -478,37 +375,46 @@ justify-content:flex-end;
 }
 
 .aiRow{
-justify-content:flex-start;
+justify-content:stretch;
 }
 
 .bubble{
-max-width:78%;
 padding:14px 16px;
 border-radius:16px;
-line-height:1.55;
+line-height:1.6;
 font-size:14px;
-word-break:break-word;
 }
 
 .userBubble{
+max-width:70%;
 background:linear-gradient(180deg,#2563eb,#1d4ed8);
 color:white;
 }
 
 .aiBubble{
+width:100%;
+max-width:100%;
 background:var(--bubble);
 border:1px solid #28303a;
 }
 
 .aiBubble pre{
-background:#0b0f14;
-padding:14px;
-border-radius:12px;
-overflow:auto;
-margin-top:10px;
+background:#0b0f14 !important;
+padding:16px !important;
+border-radius:14px !important;
+overflow:auto !important;
+margin-top:12px !important;
+border:1px solid #30363d !important;
 }
 
-/* COMPOSER */
+.aiBubble code{
+font-family:Consolas,monospace !important;
+font-size:13px !important;
+}
+
+.aiBubble p{
+margin:8px 0;
+}
 
 #composer{
 padding:14px;
@@ -517,7 +423,7 @@ background:var(--panel);
 }
 
 #inputWrap{
-max-width:920px;
+max-width:1100px;
 margin:auto;
 display:flex;
 gap:10px;
@@ -550,21 +456,12 @@ cursor:pointer;
 font-size:18px;
 }
 
-#hint{
-max-width:920px;
-margin:8px auto 0;
-font-size:12px;
-color:var(--muted);
-}
-
-::-webkit-scrollbar{
-height:8px;
-width:8px;
-}
-
-::-webkit-scrollbar-thumb{
-background:#30363d;
-border-radius:20px;
+input,select{
+background:#0f141a;
+border:1px solid var(--border);
+color:white;
+padding:7px 10px;
+border-radius:10px;
 }
 
 </style>
@@ -573,22 +470,9 @@ border-radius:20px;
 <body>
 
 <div id="topbar">
-
-<div class="top-row">
-<div class="brand">OLLAMA DEV · CHAT CODER</div>
-
-<div class="statusWrap">
-<div id="status"></div>
-<span id="statusText">Offline</span>
-</div>
-</div>
-
-<div class="bottom-row">
 <input id="ip" placeholder="192.168.x.x">
-<button id="connectBtn" onclick="connect()">Conectar</button>
+<button onclick="connect()">Conectar</button>
 <select id="model"></select>
-</div>
-
 </div>
 
 <div id="tabs">
@@ -598,18 +482,17 @@ border-radius:20px;
 
 <div id="chatWrap">
 <div id="chatArea">
-<div id="chatTitle"></div>
 <div id="chat"></div>
 </div>
 </div>
 
 <div id="composer">
 <div id="inputWrap">
-<textarea id="prompt" rows="1"
+<textarea id="prompt"
+rows="1"
 placeholder="Ask anything about your code..."></textarea>
 <button id="send" onclick="send()">➜</button>
 </div>
-<div id="hint">Enter enviar · Shift + Enter salto</div>
 </div>
 
 <script>
@@ -627,27 +510,18 @@ renderTabs(m.tabs,m.selected);
 
 if(m.type === 'loadChat'){
 document.getElementById('chat').innerHTML = m.html || '';
-document.getElementById('chatTitle').innerText = m.title || '';
+Prism.highlightAll();
 scrollBottom();
 }
 
 if(m.type === 'setModels'){
 document.getElementById('model').innerHTML =
-m.models.map(x => '<option>'+x+'</option>').join('');
-}
-
-if(m.type === 'onConnected'){
-document.getElementById('status').classList.add('connected');
-document.getElementById('statusText').innerText='Connected';
-}
-
-if(m.type === 'onDisconnected'){
-document.getElementById('status').classList.remove('connected');
-document.getElementById('statusText').innerText='Offline';
+m.models.map(x=>'<option>'+x+'</option>').join('');
 }
 
 if(m.type === 'addChunk'){
 currentAi.innerHTML = marked.parse(m.value);
+Prism.highlightAllUnder(currentAi);
 scrollBottom();
 }
 
@@ -663,8 +537,7 @@ document.getElementById('tabList').innerHTML =
 tabs.map(t => \`
 <div class="tab \${t.id===selected?'active':''}">
 <span onclick="switchChat('\${t.id}')">💬 \${escapeHtml(t.title)}</span>
-<span class="close"
-onclick="event.stopPropagation();closeChat('\${t.id}')">✕</span>
+<span onclick="event.stopPropagation();closeChat('\${t.id}')">✕</span>
 </div>\`).join('');
 }
 
